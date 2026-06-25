@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MapEditor</title>
+
+  <!-- Bibliothèque Konva (rendu sur canvas) -->
+  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+
+  <style>
+    body {
+      margin: 10px;
+    }
+
+    #menu {
+      display: flex;
+    }
+
+    .navbar {
+      background-color: orange;
+      height: auto;
+    }
+
+    #Main {
+      background-color: blue;
+      display: flex;
+    }
+
+    #container {
+      background-color: yellow;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      flex-grow: 1;
+    }
+
+    #details {
+      background-color: red;
+      display: flex;
+      flex-direction: column;
+      width: 20%;
+      padding: 10px;
+    }
+
+    #details h1, #details label, #details button {
+      margin: 5px;
+    }
+
+    #details h1 {
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="menu" class="navbar">
+    <div id="listZone"></div>
+    <div id="btnZone"></div>
+  </div>
+
+  <div id="Main">
+    <div id="container"></div>
+    <div id="details" class="navbar">
+      <h1>Details</h1>
+      <label id="coordsItemsX">Coordonnee x:</label>
+      <label id="coordsItemsY">Coordonnee y: </label>
+      <label id="colorItems">Couleur : </label>
+      <label id="Url">Url : </label>
+      <button id="EditorMapEdit" onclick="EditElem()">Editer</button>
+      <button id="EditorMapDelete" onclick="DeleteElem()">Supprimer</button>
+    </div>
+  </div>
+
+  <script>
+    //******* Constante *******//
+    // Taille du container et du svg
+    const width = 900;
+    const height = 600;
+
+    // Permet de savoir si on est en edit
+    let editMode = true;
+    let ListImgMenu = [];
+    let lastElemSelected = null;
+
+    // Variable pour savoir si est actuellement entrain d'édit un polygone
+    let drawing = false;
+
+    // Gere la taille des cercles permettant l'édition d'un polygone
+    let circleradiusenter = 15;
+    let circleradiusleave = 10;
+
+    // Variable permettant le stockage et la gestion des polygones
+    let circles = [];
+    let lines = [];
+
+    // On selectionne nos deux bouton et on les caches
+    var editBtn = document.getElementById('EditorMapEdit');
+    var deleteBtn = document.getElementById('EditorMapDelete');
+    editBtn.setAttribute('hidden', true);
+    deleteBtn.setAttribute('hidden', true);
+
+    //******* Creation Canva *******//
+    // Creation du container
+    const stage = new Konva.Stage({
+      container: 'container',
+      width: width,
+      height: height,
+      // Gestion du deplacement
+      draggable: true,
+    });
+
+    // Redefinition des coordonnées du stage par rapport au centre de l'image
+    stage.position({
+      x: stage.width() / 2,
+      y: stage.height() / 2
+    });
+
+    // Gestion des evenements des polygones
+    stage.on('click', function (e) {
+      if(drawing) {
+        // On creer le cercle
+        var pos = stage.getRelativePointerPosition();
+        var circle = CreateCircle(pos.x, pos.y)
+
+        // On ajoute le cercle sur la carte et on met à jour le polygone
+        layer.add(circle);
+        circles.push(circle);
+        updateLines();
+      }
+      // Si on ne clique sur aucun element on reset les détails
+      else if(e.target.attrs.name != null)
+        DetailsElem(e.target);
+      else
+        DetailsElem();
+    });
+
+    // on termine le polygone si on a double clique
+    stage.on('dblclick', function (e) {
+      if(drawing) {
+        GeneratePolygone();
+      }
+    });
+
+    // Création du layer
+    const layer = new Konva.Layer();
+
+    function InitialisationCanva() {
+      // Permet d'ajouter Konva sur l'image
+      const imageObj = new Image();
+      imageObj.onload = function() {
+        // On crée l'image ici
+        var image = new Konva.Image({
+          image: imageObj,
+          x: -imageObj.width / 2,
+          y: -imageObj.height / 2,
+          width: imageObj.width,
+          height: imageObj.height
+        });
+
+        // On ajoute le plan au layer
+        layer.add(image).draw();
+        stage.add(layer);
+
+        // Gestion du zoom et de sa vitesse
+        var scaleBy = 1.11;
+        stage.on('wheel', (e) => {
+          // stop default scrolling
+          e.evt.preventDefault();
+
+          var oldScale = stage.scaleX();
+          var pointer = stage.getPointerPosition();
+
+          var mousePointTo = {
+            x: (pointer.x - stage.x()) / oldScale,
+            y: (pointer.y - stage.y()) / oldScale,
+          };
+
+          // how to scale? Zoom in? Or zoom out?
+          let direction = e.evt.deltaY > 0 ? 1 : -1;
+
+          // when we zoom on trackpad, e.evt.ctrlKey is true
+          // in that case lets revert direction
+          if (e.evt.ctrlKey) {
+            direction = -direction;
+          }
+
+          var newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
+
+          stage.scale({ x: newScale, y: newScale });
+
+          var newPos = {
+            x: pointer.x - mousePointTo.x * newScale,
+            y: pointer.y - mousePointTo.y * newScale,
+          };
+          stage.position(newPos);
+        });
+
+        //******* Gestion du Menu *******//
+        const pics = ["https://em-content.zobj.net/source/skype/289/large-green-square_1f7e9.png", "https://www.publicdomainpictures.net/pictures/310000/nahled/blue-circle.png", "https://icons.veryicon.com/png/System/Flatastic%206/Pentagon.png"];
+
+        const $menu = document.querySelector('#listZone');
+        pics.forEach(function(value, index) {
+          const img = new Image();
+          img.src = value;
+          img.width = 75;
+          img.height = 75;
+          img.style.margin = "5px 0 0 5px";
+          img.name = "MenuItem";
+          img.addEventListener('click', function() {
+            // Si on est pas en mode edit il ne ce passe rien
+            if(!editMode){
+              alert("Mode édition non actif");
+              return
+            }
+            else if(index == 2) {
+              // On a selectionné un polygone donc on passe en mode dessin de polygone
+              alert("Debut création polygone");
+              EditMode();
+              DetailsElem();
+              drawing = true;
+              return
+            }
+
+            const src = this.src;
+            var pictElem = "";
+
+            switch (index) {
+              case 0:
+                // On crée un rectangle
+                pictElem = new Konva.Rect({
+                  x : -50, y : -50, width: 100, height: 100,
+                  fill: 'green',
+                  stroke: 'black',
+                  opacity: 0.6,
+                  name: "Item",
+                  href: "https://vpwhite.com/",
+                  draggable: true
+                });
+                break;
+              case 1:
+              default:
+                pictElem = new Konva.Circle({
+                  x : 0, y : 0, width: 100, height: 100,
+                  radius: 70,
+                  fill: 'blue',
+                  stroke: 'black',
+                  strokeWidth: 4,
+                  opacity: 0.6,
+                  name: "Item",
+                  href: "https://vpwhite.com/",
+                  draggable: true
+                });
+                break;
+            }
+
+            // On définie tout les événements associé à une zone
+            DefineEventZone(pictElem);
+
+            // Changer taille du cercle et du rectangle
+            var resizePictElem = new Konva.Transformer({
+              anchorSize: 10,
+              borderDash: [3, 3],
+              nodes: [pictElem],
+            });
+
+            // On add au schema
+            layer.add(pictElem).draw();
+            layer.add(resizePictElem);
+          });
+          $menu.appendChild(img);
+          ListImgMenu.push(img);
+        });
+      };
+
+      imageObj.src = 'https://upload.wikimedia.org/wikipedia/commons/2/26/Palais_Lanckoro%C5%84ski_ground_floor_plan.svg';
+    }
+
+
+    //******* Génération PolyGone *******//
+    // Fonction qui definie les rules du cercle
+    function CreateCircle(posX,posY) {
+        var circle = new Konva.Circle({
+          x: posX,
+          y: posY,
+          radius: circleradiusleave,
+          fill: 'red',
+          draggable: true,
+        });
+
+        // Si on clique sur un des cercle existant cela créer le polygone
+        circle.on('click', function () {
+          GeneratePolygone();
+        });
+
+        // on augmente la taille du cercle su on met le curceur dessus
+        circle.on('mouseenter', function () {
+          circle.radius(circleradiusenter);
+          layer.draw();
+        });
+
+        // on réduit la taille du cercle su on met le curceur dessus
+        circle.on('mouseleave', function () {
+          circle.radius(circleradiusleave);
+          layer.draw();
+        });
+
+        // si on bouge un cercle on met à jour la previsualisation
+        circle.on('dragmove', function () {
+          updateLines();
+        });
+
+        return circle;
+    }
+
+    function updateLines() {
+      // Remove existing lines
+      for (var i = 0; i < lines.length; i++) {
+        lines[i].destroy();
+      }
+      lines = [];
+
+      // Create new lines
+      var points = circles.map(function (circle) {
+        return [circle.x(), circle.y()];
+      });
+
+      if (points.length > 1) {
+        var line = new Konva.Line({
+          points: [].concat.apply([], points),
+          stroke: 'black',
+          strokeWidth: 2,
+          closed: true,
+          fill: 'lightgray',
+          opacity: 0.6,
+        });
+
+        layer.add(line);
+        lines.push(line);
+      }
+
+      layer.draw();
+    }
+
+    function DeleteCircleAndLines(circles, lines) {
+      // Supprimer tous les cercles
+      circles.forEach((circle) => {
+        circle.destroy();
+      });
+      circles.splice(0, circles.length);
+
+      // Supprimer toutes les lignes
+      lines.forEach((line) => {
+        line.destroy();
+      });
+      lines.splice(0, lines.length);
+
+      // Redessiner la couche
+      layer.draw();
+    }
+
+    function GeneratePolygone() {
+      if(drawing && circles.length >= 3) {
+        // On arrête la modification et on crée l'objet polygone
+        drawing = false;
+
+        // On stocke tous les points délimitant le polygone
+        let pointsPoly = [];
+
+        // On récupère la liste des points que l'on a arrondi
+        circles.forEach(element => {pointsPoly.push(parseInt(element.x().toFixed(0))) ; pointsPoly.push(parseInt(element.y().toFixed(0)))});
+
+        // On crée notre polygone
+        var poly = new Konva.Line({
+          points: pointsPoly,
+          fill: 'red',
+          stroke: 'black',
+          strokeWidth: 5,
+          closed: true,
+          opacity: 0.6,
+          draggable: true,
+          name: "Item",
+          href: "https://vpwhite.com/",
+        });
+
+        // On définie tout les événements associé à une zone
+        DefineEventZone(poly);
+
+        // On ajoute le polygone au layer
+        layer.add(poly).draw();
+
+        // On supprime les cercles et lignes
+        DeleteCircleAndLines(circles, lines);
+        circles = [];
+        lines = [];
+
+        // On met à jour le dernier élément sélectionné et on l'affiche dans les détails
+        lastElemSelected = poly;
+
+        // On repasse en mode édition et on affiche les détails
+        EditMode();
+        DetailsElem(poly);
+      }
+    }
+
+
+    function EditPolygone(poly) {
+      // on vérifie que nous ne sommes pas déjà actuellement en train d'éditer un polygone et que poly n'est pas nul
+      if (!drawing && poly != null) {
+        drawing = true;
+
+        // on recrée des cercles pour chaque point
+        const points = poly.points();
+        for (let i = 0; i < points.length; i = i + 2) {
+          const circle = CreateCircle(points[i] + poly.x(), points[i + 1] + poly.y());
+
+          // on ajoute le cercle sur la carte et on met à jour le polygone
+          layer.add(circle);
+          circles.push(circle);
+        }
+
+        // on supprime l'ancien polygone
+        poly.destroy();
+
+        // on met la zone en mode edit
+        updateLines();
+      }
+    }
+
+    //******* Gestion Mode Edit *******//
+    // Fonction pour edit ou non la carte
+    function EditMode() {
+      if(!drawing){
+        alert("Changement du mode d'edition");
+
+        // on selectionne les zones
+        var items = stage.find('.Item');
+
+        // on selectionne tout les transformer
+        var transformers = stage.find("Transformer");
+
+        // On empêche toute modification si edit = false
+        if(editMode) {
+
+          // On empeche le deplacement des items
+          items.forEach(function (items) {
+            items.setAttr('draggable', false);
+          })
+
+          // On empêche le redimensionnement
+          transformers.forEach(function (items) {
+            items.setAttr('resizeEnabled', false);
+            items.setAttr('rotateEnabled', false);
+          })
+
+          // On reduit l'opacité des boutons du menu
+          ListImgMenu.forEach(function(img) {
+            img.style.opacity = 0.4;
+          });
+
+          transformers.forEach(function (tr) {
+            tr.destroy();
+          });
+
+          // On cache les bouttons editer et supprimer dans details
+          HiddenButton(true, null);
+        }
+        else {
+          // On remet le menu en editable
+          items.forEach(function (items) {
+            items.setAttr('draggable', true);
+          })
+
+          transformers.forEach(function (items) {
+            items.setAttr('resizeEnabled', true);
+            items.setAttr('rotateEnabled', true);
+          })
+
+          ListImgMenu.forEach(function(img) {
+            img.style.opacity = 1;
+          });
+
+          // On remet le transformer a tout les objets non polygone
+          items.forEach(function (item) {
+            if(item.getClassName() !== 'Line') {
+              var transformer = new Konva.Transformer({
+                anchorSize: 10,
+                borderDash: [3, 3],
+                nodes: [item],
+              });
+              layer.add(transformer);
+            }
+          });
+        }
+
+        // On met à jour
+        layer.draw();
+
+        // on met a jour le boolean
+        editMode = editMode ? false : true;
+      }
+      else
+        alert("Il n'est pas possible de changer de mode d'édition durant la création d'un polygone !")
+    }
+
+    // Permet de passer en edit mode
+    function AddEditMode() {
+      // Génération de l'image
+      const linkImg = "https://cdn.pixabay.com/photo/2014/04/02/10/41/button-304217_960_720.png";
+      const btnEditMode = new Image();
+      btnEditMode.src = linkImg;
+      btnEditMode.width = 75;
+      btnEditMode.height = 75;
+      btnEditMode.style.margin = "5px 0 0 5px";
+      btnEditMode.onclick = function() {
+        EditMode();
+      };
+
+      // Ajouter l'élément img en dernier de #menu
+      document.querySelector('#btnZone').appendChild(btnEditMode);
+    }
+
+    //******* Gestion Mode Save *******//
+    // Fonction pour sauvegarder le fichier en Json
+    function ExportToJson() {
+      // save stage as a json string
+      var json = stage.toJSON();
+
+      // create a blob from the json string
+      var blob = new Blob([json], {type: "application/json"});
+
+      // create a temporary link element to trigger download
+      var link = document.createElement("a");
+      link.download = "stage.json";
+      link.href = URL.createObjectURL(blob);
+      link.onclick = function() {
+        // destroy link after download
+        setTimeout(function() {
+          URL.revokeObjectURL(blob);
+          link.remove();
+        }, 0);
+      };
+
+      // trigger click event to download file
+      link.click();
+    }
+
+    // Permet d'ajouter le bouton de sauvegarde
+    function AddSaveBtn() {
+      // Génération de l'image
+      const linkImg = "https://cdn-icons-png.flaticon.com/512/1191/1191252.png";
+      const btnSave = new Image();
+      btnSave.src = linkImg;
+      btnSave.width = 75;
+      btnSave.height = 75;
+      btnSave.style.margin = "5px 0 0 5px";
+      btnSave.onclick = function() {
+        ExportToJson();
+      };
+
+      // Ajouter l'élément img en dernier de #menu
+      document.querySelector('#btnZone').appendChild(btnSave);
+    }
+
+
+    //******* Gestion NavBar Details *******//
+    // Function pour afficher ou non les bouton editer et supprimer
+    function HiddenButton(setHidden, items) {
+      // On verifie que nous somme en mode edit
+      if(editMode){
+
+        // On regarde si l'on souhaite afficher ou non les boutton
+        if(setHidden){
+          if(!deleteBtn.hidden) {
+            editBtn.setAttribute('hidden', true);
+            deleteBtn.setAttribute('hidden', true);
+          }
+        }
+        else {
+          // On permet l'édition que si il s'agit d'un polygone
+          if(items != null) {
+            // On vérifie si c'est un polygone et on affiche le bouton edit
+            if(items.getClassName() === 'Line')
+              editBtn.removeAttribute('hidden');
+
+            // Sinon si le bouton edit était afficher on le cache
+            else if (!editBtn.hidden)
+              editBtn.setAttribute('hidden', true);
+          }
+          deleteBtn.removeAttribute('hidden');
+        }
+      }
+    }
+
+    //Fonction pour definir les événements d'une zone
+    function DefineEventZone(item){
+      // On défini les evenements pour afficher les détails et on les affiches
+      item.on('click', () => DetailsElem(item));
+      item.on('dragstart', () => DetailsElem(item));
+      item.on('dragend', () => DetailsElem(item));
+
+      //On crée un evenement double click sur le cercle
+      item.on('dblclick', function() {
+        window.open(item.attrs.href, '_blank');
+      });
+
+      // On raffraichie la section detail
+      DetailsElem(item);
+    }
+
+    // Fonction pour voirs les détails d'une zone
+    function DetailsElem(elem = null){
+      // Récupération des éléments par leur ID
+      const coordsItemsX = document.getElementById('coordsItemsX');
+      const coordsItemsY = document.getElementById('coordsItemsY');
+      const colorItems = document.getElementById('colorItems');
+      const urlElem = document.getElementById('Url');
+
+      // Si aucun element selectionné alors on remet detail par défault
+      if(elem != null) {
+        // Changer le contenu des éléments
+        if (elem.getClassName() === 'Line') { // pour les polygones
+          const rect = elem.getClientRect();
+          coordsItemsX.textContent = 'Coordonnee x: ' + rect.x.toFixed(2);
+          coordsItemsY.textContent = 'Coordonnee y: ' + rect.y.toFixed(2);
+        } else { // pour les cercles et les rectangles
+          coordsItemsX.textContent = 'Coordonnee x: ' + elem.x().toFixed(2);
+          coordsItemsY.textContent = 'Coordonnee y: ' + elem.y().toFixed(2);
+        }
+        colorItems.textContent = 'Couleur : ' + elem.fill();
+        urlElem.textContent = 'Url : ' + elem.getAttr('href');
+        HiddenButton(false, elem);
+      }
+      else {
+        // Changer le contenu des éléments
+        coordsItemsX.textContent = 'Coordonnee x: ';
+        coordsItemsY.textContent = 'Coordonnee y: ';
+        colorItems.textContent = 'Couleur : ';
+        urlElem.textContent = 'Url : ';
+        HiddenButton(true, elem);
+      }
+
+      // On met egalement à jour le dernier element selectionné
+      lastElemSelected = elem;
+    }
+
+    // Fonction pour editer une zone
+    function EditElem(){
+    // On verifie qu'on soit en mode edit, qu'on est selectionné une zone,
+      if(editMode && lastElemSelected != null){
+        // Si la zone est un polygone et qu'on en edit pas un autre
+        if(lastElemSelected.getClassName() === 'Line' && drawing == false){
+          EditMode();
+          EditPolygone(lastElemSelected);
+          DetailsElem();
+        }
+      }
+      else {
+        alert("Les conditions actuelles ne permettent aucune edition !");
+      }
+    }
+
+    // Fonction qui supprime une zone et son transformer
+    function DeleteElem(){
+      if(editMode && lastElemSelected != null){
+        // Parcourir les enfants de la couche layer pour trouver le Transformer associé à pictElem
+        var transformer = "";
+        var children = layer.getChildren();
+        for (var i = 0; i < children.length; i++) {
+          var child = children[i];
+          if (child.getClassName() === 'Transformer' && child.nodes()[0] === lastElemSelected) {
+            transformer = child;
+            break;
+          }
+        }
+
+        // Si le Transformer est trouvé, le supprimer
+        if (transformer) {
+          transformer.destroy();
+          layer.draw();
+        }
+
+        // On supprime pour finir la zone et on reset la section detail
+        lastElemSelected.destroy();
+        lastElemSelected = "";
+        DetailsElem();
+      }
+      else {
+        alert("Les conditions actuelles ne permettent aucune suppresion !");
+      }
+    }
+
+    //******* Execution EditorMap *******//
+    // On Genere la page
+    InitialisationCanva();
+    AddEditMode();
+    AddSaveBtn();
+  </script>
+</body>
+</html>
